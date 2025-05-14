@@ -9,9 +9,6 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [
         col.strip().lower()
-           .replace(" ", "_")
-           .replace("/", "_")
-           .replace("-", "_")
         for col in df.columns
     ]
 
@@ -38,9 +35,9 @@ def import_schedule(excel_path: str, db_name: str):
 
     table = db_table("sessions", schema)
 
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    print(df.to_string(index=False))
+    # pd.set_option('display.max_rows', None)
+    # pd.set_option('display.max_columns', None)
+    
 
 
 # Argument parsing
@@ -50,15 +47,18 @@ def main():
     p = argparse.ArgumentParser(
         description="Import all sheets from an Excel file into SQLite"
     )
+
     p.add_argument(
         "excel_file",
         help="Path to the Excel file (must be .xls or .xlsx)"
     )
+
     p.add_argument(
         "--db", "-d",
         help="Path for the SQLite DB (defaults to EXCEL_BASE.db)",
         default=None
     )
+
     args = p.parse_args()
 
     if not os.path.isfile(args.excel_file):
@@ -71,5 +71,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
