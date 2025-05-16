@@ -1,73 +1,97 @@
 #!/usr/bin/env python3
-from db_table import db_table
 import argparse
-import os
+import sys
+import sqlite3
+
 import pandas as pd
+from db_table import db_table
 
+def normalize_header(label: str) -> str:
+    s = (label or "").strip()
 
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [
-        col.strip().lower()
-        for col in df.columns
-    ]
+    if s.startswith("*"):
+        s = s[1:]
 
-    return df
+    s = s.lower()
 
+    for ch in ("\n", "/", "-", "(", ")"):
+        s = s.replace(ch, " ")
 
-# Import Agenda excel -> define schema -> initialize data table
-def import_schedule(excel_path: str, db_name: str):
-    df = pd.read_excel(excel_path, skiprows=14, engine="xlrd")
-    df = normalize_columns(df)
+    key = "_".join(s.split())
 
-    schema = { 
-        "id":             "integer PRIMARY KEY AUTOINCREMENT",
-        "date":           "text NOT NULL",
-        "time_start":     "text NOT NULL",
-        "time_end":       "text NOT NULL",
-        "session_title":  "text NOT NULL",
-        "room_location":  "text",
-        "description":    "text",
-        "speakers":       "text",
-        "is_subsession":  "integer NOT NULL DEFAULT 0",
-        "parent_id":      "integer"
+    if key == "date": return "date"
+    if "time" in key and "start" in key: return "time_start"
+    if "time" in key and "end" in key: return "time_end"
+    if "session" in key and "title" in key: return "title"
+    if "location" in key: return "location"
+    if "description" in key: return "description"
+    if "speaker" in key: return "speaker"
+
+    return None
+
+def import_schedule(excel_path: str):
+    # drop old table so schema changes apply
+    conn = sqlite3.connect(db_table.DB_NAME)
+    conn.execute("DROP TABLE IF sessions EXISTS")
+    conn.commit()
+    conn.close()
+
+    # Define schema & create fresh tabxle
+    SCHEMA = {
+        "id":           "integer PRIMARY KEY",
+        "parent_id":    "integer",
+        "date":         "text",
+        "time_start":   "text",
+        "time_end":     "text",
+        "title":        "text",
+        "location":     "text",
+        "description":  "text",
+        "speaker":      "text",
     }
+    table = db_table("sessions", SCHEMA)
 
-    table = db_table("sessions", schema)
+    # read the sheet: header is on Excel row 15 → pandas index 14
+    raw = pd.read_excel(excel_path, header=None, dtype=str)
+    header_idx = 14
 
-    # pd.set_option('display.max_rows', None)
-    # pd.set_option('display.max_columns', None)
-    
+    # build map from fixed header row col to idx
+    header_row = raw.iloc[header_idx].fillna("").tolist()
+    col_map = {}
+    for idx, raw_label in enumerate(header_row):
+        field = normalize_header(raw_label)
+        if field and field not in col_map:
+            col_map[field] = idx
 
+    required = ["date","time_start","time_end","title","location","description","speaker"]
 
-# Argument parsing
-# excel_file (required)
-# --db (optional; defaults to <excel_basename>.db)
+    # iterate all rows below that header and insert
+    current_parent = None
+    for _, row in raw.iloc[header_idx+1:].iterrows():
+        cells = row.fillna("").astype(str).str.strip().tolist()
+        # escape single-quotes by doubling them
+        rec = {
+            field: cells[col_map[field]].replace("'", "''")
+            for field in required
+        }
+
+        if rec["date"]:
+            item = {"parent_id": "", **rec}
+            current_parent = table.insert(item)
+        else:
+            # sub-session of last parent
+            item = {"parent_id": str(current_parent), **rec}
+            table.insert(item)
+
+    table.close()
+    print("import done")
+
 def main():
     p = argparse.ArgumentParser(
-        description="Import all sheets from an Excel file into SQLite"
+        description="import agenda into sqlite"
     )
-
-    p.add_argument(
-        "excel_file",
-        help="Path to the Excel file (must be .xls or .xlsx)"
-    )
-
-    p.add_argument(
-        "--db", "-d",
-        help="Path for the SQLite DB (defaults to EXCEL_BASE.db)",
-        default=None
-    )
-
+    p.add_argument("excel_file", help="path to the agenda.xls file")
     args = p.parse_args()
-
-    if not os.path.isfile(args.excel_file):
-        p.error(f"Excel file not found: {args.excel_file}")
-
-    base = os.path.splitext(os.path.basename(args.excel_file))[0]
-    sqlite_path = args.db or f"{base}.db"
-
-    import_schedule(args.excel_file, sqlite_path)
+    import_schedule(args.excel_file)
 
 if __name__ == "__main__":
     main()
