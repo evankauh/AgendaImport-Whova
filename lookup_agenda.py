@@ -5,9 +5,9 @@ import argparse
 import sys
 from db_table import db_table
 
-def print_rec(r):
+def print_rec(r, parent_sesh=None):
     # tab-separated output
-    print(
+    line = (
         f"{r['date']}\t"
         f"{r['time_start']}\t"
         f"{r['time_end']}\t"
@@ -16,6 +16,9 @@ def print_rec(r):
         f"{r['description']}\t"
         f"{r['speaker']}"
     )
+    if parent_sesh:
+        line += f"\t(Subsession of: {parent_sesh})"
+    print(line)
 
 def lookup_agenda(field, term):
     valid = ["date","time_start","time_end","title","location","description","speaker"]
@@ -41,29 +44,33 @@ def lookup_agenda(field, term):
 
     q = term.lower().strip()
     parents = set()
+    children = set()  # ADDED: track subsessions that match directly
 
-    # find any session/subsession with term in the chosen field
     for r in recs:
         val = (r[field] or "").lower()
         if q in val:
-            pid = r["parent_id"].strip()
-            parents.add(int(pid) if pid else int(r["id"]))
+            if r["parent_id"].strip():
+                children.add(int(r["id"]))    # ADDED
+            else:
+                parents.add(int(r["id"]))
 
-    if not parents:
+    if not parents and not children:
         print("No records found.")
         return
+    
+    # map id→title for annotation
+    id_map = { int(r["id"]): r["title"] for r in recs }  
 
-    # print each matching session and respective subsessions
-    for pid in sorted(parents):
-        # parent session
-        parent = next((x for x in recs if int(x["id"]) == pid), None)
-        if parent:
-            print_rec(parent)
-            # subsessions
-            for sub in recs:
-                if sub["parent_id"].strip() and int(sub["parent_id"]) == pid:
-                    print_rec(sub)
+    for r in recs:
+        rid = int(r["id"])
+        pid = r["parent_id"]
 
+        if rid in parents:
+            print_rec(r)
+        elif pid and int(pid) in parents:
+            print_rec(r, parent_sesh=id_map[int(pid)])
+        elif rid in children:
+            print_rec(r, parent_sesh=id_map[int(pid)])
 
 def main():
     p = argparse.ArgumentParser(
