@@ -32,11 +32,10 @@ def normalize_header(label: str) -> str:
 def import_schedule(excel_path: str):
     # drop old table so schema changes apply
     conn = sqlite3.connect(db_table.DB_NAME)
-    conn.execute("DROP TABLE IF sessions EXISTS")
+    conn.execute("DROP TABLE IF EXISTS sessions")  # EDITED: fixed syntax
     conn.commit()
     conn.close()
 
-    # Define schema & create fresh tabxle
     SCHEMA = {
         "id":           "integer PRIMARY KEY",
         "parent_id":    "integer",
@@ -57,24 +56,30 @@ def import_schedule(excel_path: str):
     # build map from fixed header row col to idx
     header_row = raw.iloc[header_idx].fillna("").tolist()
     col_map = {}
+    type_idx = None  
     for idx, raw_label in enumerate(header_row):
         field = normalize_header(raw_label)
         if field and field not in col_map:
             col_map[field] = idx
+        low = (raw_label or "").lower()
+        if "sub" in low and "session" in low and type_idx is None:
+            type_idx = idx
 
     required = ["date","time_start","time_end","title","location","description","speaker"]
 
-    # iterate all rows below that header and insert
     current_parent = None
     for _, row in raw.iloc[header_idx+1:].iterrows():
         cells = row.fillna("").astype(str).str.strip().tolist()
-        # escape single-quotes by doubling them
+
+        type = cells[type_idx].lower() if type_idx is not None else ""
+        is_sub = (type == "sub")
+
         rec = {
             field: cells[col_map[field]].replace("'", "''")
             for field in required
         }
 
-        if rec["date"]:
+        if not is_sub:
             item = {"parent_id": "", **rec}
             current_parent = table.insert(item)
         else:
